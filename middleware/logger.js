@@ -1,3 +1,4 @@
+require("dotenv").config();
 const axios = require("axios");
 
 const LOG_API_URL = process.env.LOG_API_URL;
