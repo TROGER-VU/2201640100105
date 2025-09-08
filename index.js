@@ -2,22 +2,33 @@ require("dotenv").config();
 const express = require("express");
 const { customAlphabet } = require("nanoid");
 const { log, loggingMiddleware } = require("./middleware/logger");
-const authMiddleware = require("./middleware/auth");
+const axios = require("axios");
 
 const app = express();
 app.use(express.json());
-app.use(loggingMiddleware("router"));
+app.use(loggingMiddleware("handler"));
 const port = process.env.PORT || 3000;
 
 const urlStore = {};
 const nanoid = customAlphabet("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", 6);
+
+async function getLocation(ip) {
+  try {
+    const response = await axios.get(`https://ipapi.co/${ip}/json/`);
+    const { city, region, country_name } = response.data;
+    return `${city}, ${region}, ${country_name}`;
+  } catch (err) {
+    console.error("Location lookup failed:", err.message);
+    return "Unknown";
+  }
+}
 
 function getExpiry(validityMinutes = 30) {
   const now = new Date();
   return new Date(now.getTime() + Math.min(validityMinutes, 30) * 60000);
 }
 
-app.post("/shorturls", authMiddleware, (req, res) => {
+app.post("/shorturls", (req, res) => {
   const { url, validity = 30, shortcode } = req.body;
 
   if (!url || typeof url !== "string") {
@@ -50,7 +61,7 @@ app.post("/shorturls", authMiddleware, (req, res) => {
   });
 });
 
-app.get("/:shortcode", authMiddleware, (req, res) => {
+app.get("/:shortcode", async (req, res) => {
   const { shortcode } = req.params;
   const entry = urlStore[shortcode];
 
@@ -64,11 +75,14 @@ app.get("/:shortcode", authMiddleware, (req, res) => {
     log("backend", "warn", "controller", `Expired link: ${shortcode}`);
     return res.status(410).json({ error: "Link expired" });
   }
+  const ip = req.headers["x-forwarded-for"]?.split(",")[0] || req.socket.remoteAddress;
+  const location = await getLocation(ip);
 
   entry.clicks += 1;
   entry.history.push({
     timestamp: now.toISOString(),
     referrer: req.get("referer") || "direct",
+    location,
   });
 
   log("backend", "info", "service", `Redirecting ${shortcode} to ${entry.url}`);
@@ -76,7 +90,7 @@ app.get("/:shortcode", authMiddleware, (req, res) => {
 });
 
 
-app.get("/shorturls/:shortcode", authMiddleware, (req, res) => {
+app.get("/shorturls/:shortcode", (req, res) => {
   const { shortcode } = req.params;
   const entry = urlStore[shortcode];
 
@@ -84,12 +98,19 @@ app.get("/shorturls/:shortcode", authMiddleware, (req, res) => {
     return res.status(404).json({ error: "Short URL not found" });
   }
 
+  const formattedHistory = entry.history.map(h => ({
+    timestamp: h.timestamp,
+    referrer: h.referrer,
+    location: h.location || "Unknown",
+  }));
+
+
   res.json({
     originalUrl: entry.url,
     createdAt: entry.createdAt.toISOString(),
     expiry: entry.expiry.toISOString(),
     clicks: entry.clicks,
-    history: entry.history,
+    history: formattedHistory,
   });
 });
 

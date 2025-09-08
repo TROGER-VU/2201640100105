@@ -2,6 +2,7 @@ require("dotenv").config();
 const axios = require("axios");
 
 const LOG_API_URL = process.env.LOG_API_URL;
+const LOG_API_TOKEN = process.env.LOG_API_TOKEN;
 
 function log(stack, level, pkg, message) {
   axios.post(LOG_API_URL, {
@@ -9,9 +10,18 @@ function log(stack, level, pkg, message) {
     level: level.toLowerCase(),
     package: pkg.toLowerCase(),
     message,
+  }, {
+    headers: {
+      Authorization: `Bearer ${LOG_API_TOKEN}`
+    }
   }).catch(err => {
-    console.error("Logging failed:", err.message);
-  });
+  console.error("Logging failed:", err.message);
+  if (err.response) {
+    console.error("Status:", err.response.status);
+    console.error("Body:", err.response.data);
+  }
+});
+
 }
 
 function loggingMiddleware(pkg) {
